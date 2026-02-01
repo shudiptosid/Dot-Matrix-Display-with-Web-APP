@@ -1,4 +1,4 @@
-# 🌈 HUB75 LED Matrix Display Controller
+all# 🌈 HUB75 LED Matrix Display Controller
 
 <div align="center">
 
@@ -36,7 +36,15 @@
 - **Scroll Speed Control** - Fine-tune text animation from 20ms to 500ms delay
 - **Section Color Customization** - Independent RGB color control for each display zone
 
-### 🕐 Smart Clock
+### � Announcement System (NEW!)
+
+- **Text-to-Speech** - Type any message and hear it announced through speakers
+- **MAX98357A Audio** - I2S audio amplifier with high-quality playback
+- **Free TTS** - Uses pyttsx3 (offline, no API costs)
+- **Quick Announcements** - Pre-configured announcement buttons
+- **Real-time Audio** - Instant playback with visual feedback on display
+
+### �🕐 Smart Clock
 
 - **Real-Time Display** - NTP-synchronized time with seconds
 - **Auto Date Display** - Shows current date with day of week
@@ -172,6 +180,23 @@ npm run dev
 ```
 
 Open `http://localhost:3000` in your browser.
+
+### 6️⃣ Setup Announcement System (Optional)
+
+For audio announcements with MAX98357A:
+
+1. **Hardware**: Connect MAX98357A to ESP32 (see [ANNOUNCEMENT_SETUP.md](ANNOUNCEMENT_SETUP.md))
+2. **Software**: Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **Run TTS Server**:
+   ```bash
+   python tts_server.py
+   ```
+
+📖 **Full Guide**: [ANNOUNCEMENT_SETUP.md](ANNOUNCEMENT_SETUP.md)  
+⚡ **Quick Start**: [ANNOUNCEMENT_QUICKSTART.md](ANNOUNCEMENT_QUICKSTART.md)
 
 ---
 

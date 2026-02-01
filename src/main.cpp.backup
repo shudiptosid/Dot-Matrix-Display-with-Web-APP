@@ -24,7 +24,7 @@
 #include <WebServer.h>
 #include "AudioFileSourceHTTPStream.h"
 #include "AudioFileSourceBuffer.h"
-#include "AudioGeneratorWAV.h"
+#include "AudioGeneratorMP3.h"
 #include "AudioOutputI2S.h"
 
 // ==================== CONFIGURATION ====================
@@ -74,10 +74,9 @@ const int daylightOffset_sec = 0;
 #define PANEL_CHAIN 1
 
 // MAX98357A I2S Audio Pins
-#define I2S_DOUT 40 // DIN on MAX98357A
-#define I2S_BCLK 42 // BCLK on MAX98357A
-#define I2S_LRC 41  // LRC on MAX98357A
-#define I2S_SD 21   // SD (Shutdown) pin - HIGH=enabled, LOW=shutdown
+#define I2S_DOUT 40  // DIN on MAX98357A
+#define I2S_BCLK 42  // BCLK on MAX98357A
+#define I2S_LRC 41   // LRC on MAX98357A
 
 // ==================== GLOBAL OBJECTS ====================
 MatrixPanel_I2S_DMA *dma_display = nullptr;
@@ -85,7 +84,7 @@ WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
 // Audio objects
-AudioGeneratorWAV *wav = nullptr;
+AudioGeneratorMP3 *mp3 = nullptr;
 AudioFileSourceHTTPStream *audioSource = nullptr;
 AudioFileSourceBuffer *audioBuff = nullptr;
 AudioOutputI2S *audioOut = nullptr;
@@ -129,205 +128,112 @@ void stopAudio();
 TaskHandle_t networkTaskHandle = NULL;
 
 // ==================== AUDIO FUNCTIONS ====================
-#include "driver/i2s.h"
-
-void playTestBeep()
-{
-  Serial.println("Playing test beep...");
-
-  // Configure I2S for test beep
-  i2s_config_t i2s_config = {
-      .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-      .sample_rate = 44100,
-      .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-      .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-      .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-      .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = 8,
-      .dma_buf_len = 64,
-      .use_apll = false,
-      .tx_desc_auto_clear = true};
-
-  i2s_pin_config_t pin_config = {
-      .bck_io_num = I2S_BCLK,
-      .ws_io_num = I2S_LRC,
-      .data_out_num = I2S_DOUT,
-      .data_in_num = I2S_PIN_NO_CHANGE};
-
-  // Install I2S driver on port 0 (same as standalone test that worked)
-  esp_err_t result = i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-  if (result != ESP_OK)
-  {
-    Serial.printf("I2S driver install failed: %d\n", result);
-    return;
-  }
-
-  result = i2s_set_pin(I2S_NUM_0, &pin_config);
-  if (result != ESP_OK)
-  {
-    Serial.printf("I2S set pin failed: %d\n", result);
-    i2s_driver_uninstall(I2S_NUM_0);
-    return;
-  }
-
-  // Generate beep tone (1kHz)
-  const int sample_rate = 44100;
-  const int freq = 1000;
-  const int duration_ms = 200;
-  const int samples = sample_rate * duration_ms / 1000;
-
-  int16_t *samples_data = (int16_t *)malloc(samples * 4);
-  if (!samples_data)
-  {
-    Serial.println("Failed to allocate sample buffer");
-    i2s_driver_uninstall(I2S_NUM_0);
-    return;
-  }
-
-  for (int i = 0; i < samples; i++)
-  {
-    float t = (float)i / sample_rate;
-    int16_t sample = (int16_t)(16000 * sin(2.0 * M_PI * freq * t));
-    samples_data[i * 2] = sample;     // Left
-    samples_data[i * 2 + 1] = sample; // Right
-  }
-
-  size_t bytes_written;
-  i2s_write(I2S_NUM_0, samples_data, samples * 4, &bytes_written, portMAX_DELAY);
-
-  free(samples_data);
-  delay(100);
-  i2s_driver_uninstall(I2S_NUM_0);
-  Serial.println("Test beep done!");
-}
-
 void setupAudio()
 {
   Serial.println("Initializing audio...");
-
-  // Configure SD pin for amplifier control
-  pinMode(I2S_SD, OUTPUT);
-  digitalWrite(I2S_SD, HIGH); // Enable amplifier
-  Serial.println("Amplifier enabled (SD=HIGH)");
-
-  // Play a test beep to verify audio hardware works
-  playTestBeep();
-
-  // Initialize I2S audio output on port 0
-  audioOut = new AudioOutputI2S(0, AudioOutputI2S::EXTERNAL_I2S);
+  
+  // Initialize I2S audio output
+  audioOut = new AudioOutputI2S();
   audioOut->SetPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-  audioOut->SetGain(1.0); // Volume: 0.0 to 1.0 (MAX volume for testing)
-
-  Serial.println("Audio initialized on I2S port 0!");
+  audioOut->SetGain(0.5); // Volume: 0.0 to 1.0
+  
+  Serial.println("Audio initialized!");
 }
 
 void stopAudio()
 {
-  if (wav != nullptr && wav->isRunning())
+  if (mp3 != nullptr && mp3->isRunning())
   {
-    wav->stop();
+    mp3->stop();
     Serial.println("Audio stopped");
   }
-
+  
   if (audioBuff != nullptr)
   {
     delete audioBuff;
     audioBuff = nullptr;
   }
-
+  
   if (audioSource != nullptr)
   {
     delete audioSource;
     audioSource = nullptr;
   }
-
-  if (wav != nullptr)
+  
+  if (mp3 != nullptr)
   {
-    delete wav;
-    wav = nullptr;
+    delete mp3;
+    mp3 = nullptr;
   }
-
+  
   isPlaying = false;
 }
 
 void playAudioFromURL(String url)
 {
-  Serial.println("=== AUDIO PLAYBACK START ===");
   Serial.print("Playing audio from: ");
   Serial.println(url);
-
-  // Ensure SD pin is HIGH
-  digitalWrite(I2S_SD, HIGH);
-  Serial.println("Amplifier SD pin: HIGH");
-
+  
   // Show announcement on display
   dma_display->fillRect(0, 0, 64, 10, 0);
   dma_display->setCursor(2, 1);
   dma_display->setTextColor(colorYellow);
   dma_display->print("Speaker");
-
-  Serial.println("Creating audio source...");
+  
   // Create new audio source
   audioSource = new AudioFileSourceHTTPStream(url.c_str());
   if (!audioSource)
   {
-    Serial.println("✗ Failed to create audio source!");
+    Serial.println("Failed to create audio source!");
     return;
   }
-  Serial.println("✓ Audio source created");
-
-  Serial.println("Creating buffer...");
+  
   // Create buffer
   audioBuff = new AudioFileSourceBuffer(audioSource, 2048);
   if (!audioBuff)
   {
-    Serial.println("✗ Failed to create buffer!");
+    Serial.println("Failed to create buffer!");
     delete audioSource;
     audioSource = nullptr;
     return;
   }
-  Serial.println("✓ Buffer created");
-
-  Serial.println("Creating WAV decoder...");
-  // Create WAV decoder
-  wav = new AudioGeneratorWAV();
-  if (!wav)
+  
+  // Create MP3 decoder
+  mp3 = new AudioGeneratorMP3();
+  if (!mp3)
   {
-    Serial.println("✗ Failed to create WAV decoder!");
+    Serial.println("Failed to create MP3 decoder!");
     delete audioBuff;
     delete audioSource;
     audioBuff = nullptr;
     audioSource = nullptr;
     return;
   }
-  Serial.println("✓ WAV decoder created");
-
-  Serial.println("Starting WAV playback...");
+  
   // Start playback
-  if (!wav->begin(audioBuff, audioOut))
+  if (!mp3->begin(audioBuff, audioOut))
   {
-    Serial.println("✗ Failed to start WAV playback!");
-    delete wav;
+    Serial.println("Failed to start MP3 playback!");
+    delete mp3;
     delete audioBuff;
     delete audioSource;
-    wav = nullptr;
+    mp3 = nullptr;
     audioBuff = nullptr;
     audioSource = nullptr;
     return;
   }
-  Serial.println("✓ WAV playback started!");
-
+  
   isPlaying = true;
   Serial.println("Audio playback started!");
 }
 
 void handleAudioLoop()
 {
-  if (isPlaying && wav != nullptr)
+  if (isPlaying && mp3 != nullptr)
   {
-    if (wav->isRunning())
+    if (mp3->isRunning())
     {
-      if (!wav->loop())
+      if (!mp3->loop())
       {
         // Audio finished or error
         Serial.println("Audio playback finished");
@@ -502,7 +408,7 @@ void loop()
 {
   // Handle audio playback
   handleAudioLoop();
-
+  
   // Update display every 100ms - this loop is dedicated to display only
   static unsigned long lastUpdate = 0;
   if (millis() - lastUpdate >= 100)
@@ -818,18 +724,14 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
   // Handle announcement (audio URL from TTS server)
   else if (String(topic) == topic_announce)
   {
-    Serial.println("=== ANNOUNCEMENT RECEIVED ===");
-    Serial.print("Topic: ");
-    Serial.println(topic);
-    Serial.print("URL: ");
+    Serial.print("Announcement URL received: ");
     Serial.println(message);
-
+    
     // Stop any currently playing audio
     stopAudio();
-
+    
     // Play the audio from URL
     playAudioFromURL(message);
-    Serial.println("=== PLAYING ANNOUNCEMENT ===");
   }
 }
 

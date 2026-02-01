@@ -20,6 +20,7 @@ const TOPICS = {
   color: "display/color",
   speed: "display/speed",
   restart: "display/restart",
+  announceText: "display/announce/text", // Send text to TTS server
 };
 
 // Weather code to description mapping (WMO codes)
@@ -61,6 +62,10 @@ function App() {
   const [customMessage, setCustomMessage] = useState("Hello World!");
   const [messageInput, setMessageInput] = useState("Hello World!");
   const [scrollSpeed, setScrollSpeed] = useState(150); // Default 150ms
+
+  // Announcement state
+  const [announcementText, setAnnouncementText] = useState("");
+  const [isAnnouncing, setIsAnnouncing] = useState(false);
 
   // Weather state
   const [weather, setWeather] = useState({
@@ -229,7 +234,7 @@ function App() {
         console.log("Sent restart command:", type);
       }
     },
-    [connected]
+    [connected],
   );
 
   // Auto-connect on mount and cleanup on unmount
@@ -298,13 +303,34 @@ function App() {
     }
   };
 
+  // Publish announcement
+  const publishAnnouncement = () => {
+    if (!announcementText || announcementText.trim() === "") {
+      alert("Please enter announcement text!");
+      return;
+    }
+
+    if (mqttClient && connected) {
+      setIsAnnouncing(true);
+      mqttClient.publish(TOPICS.announceText, announcementText);
+      console.log("Published announcement:", announcementText);
+
+      // Reset announcing state after 5 seconds
+      setTimeout(() => {
+        setIsAnnouncing(false);
+      }, 5000);
+    } else {
+      alert("Not connected to MQTT broker!");
+    }
+  };
+
   // Fetch weather from Open-Meteo API (FREE - No API key needed!)
   const fetchWeather = async () => {
     setWeatherLoading(true);
 
     try {
       const response = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&timezone=Asia/Kolkata`
+        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&timezone=Asia/Kolkata`,
       );
 
       if (!response.ok) throw new Error("Weather fetch failed");
@@ -361,7 +387,7 @@ function App() {
           } else {
             console.log("Preset colors published successfully!");
           }
-        }
+        },
       );
     } else {
       console.error("Cannot publish: MQTT not connected");
@@ -398,7 +424,7 @@ function App() {
           } else {
             console.log("Colors published successfully!");
           }
-        }
+        },
       );
     } else {
       console.error("Cannot publish: MQTT not connected");
@@ -535,12 +561,12 @@ function App() {
                 {scrollSpeed <= 50
                   ? "Fast"
                   : scrollSpeed <= 100
-                  ? "Medium-Fast"
-                  : scrollSpeed <= 200
-                  ? "Medium"
-                  : scrollSpeed <= 350
-                  ? "Slow"
-                  : "Very Slow"}
+                    ? "Medium-Fast"
+                    : scrollSpeed <= 200
+                      ? "Medium"
+                      : scrollSpeed <= 350
+                        ? "Slow"
+                        : "Very Slow"}
               </span>
             </div>
             <input
@@ -626,6 +652,88 @@ function App() {
                 {msg}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Announcements */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-icon announce">🔊</div>
+            <div className="card-title">Announcements</div>
+          </div>
+
+          <div className="input-group">
+            <label>Announcement Text</label>
+            <textarea
+              value={announcementText}
+              onChange={(e) => setAnnouncementText(e.target.value)}
+              placeholder="Type your announcement message here..."
+              rows={3}
+              maxLength={200}
+              style={{
+                width: "100%",
+                padding: "10px",
+                borderRadius: "8px",
+                border: "1px solid var(--border)",
+                backgroundColor: "var(--input-bg)",
+                color: "var(--text-primary)",
+                fontSize: "14px",
+                fontFamily: "inherit",
+                resize: "vertical",
+              }}
+              onKeyPress={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  publishAnnouncement();
+                }
+              }}
+            />
+            <div style={{ fontSize: "11px", opacity: 0.6, marginTop: "4px" }}>
+              {announcementText.length}/200 characters
+            </div>
+          </div>
+
+          <button
+            className={`btn ${isAnnouncing ? "btn-success" : "btn-primary"}`}
+            onClick={publishAnnouncement}
+            disabled={isAnnouncing || !connected}
+          >
+            {isAnnouncing ? "📢 Announcing..." : "🔊 Announce"}
+          </button>
+
+          <div
+            className="help-text"
+            style={{ marginTop: "12px", fontSize: "12px" }}
+          >
+            ℹ️ Make sure TTS server is running:{" "}
+            <code>python tts_server.py</code>
+          </div>
+
+          <div className="quick-actions" style={{ marginTop: "12px" }}>
+            <button
+              className="quick-btn"
+              onClick={() => setAnnouncementText("Attention please")}
+            >
+              Attention
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() => setAnnouncementText("Meeting in 5 minutes")}
+            >
+              Meeting
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() => setAnnouncementText("Lunch break")}
+            >
+              Lunch
+            </button>
+            <button
+              className="quick-btn"
+              onClick={() => setAnnouncementText("Emergency alert")}
+            >
+              Emergency
+            </button>
           </div>
         </div>
 
